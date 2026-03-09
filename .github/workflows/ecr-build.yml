@@ -1,18 +1,15 @@
-name: Build and Push Hello Image to ECR
+name: Build and Push Image to ECR
 
 on:
   push:
     branches:
       - main
 
-env:
-  IMAGE_TAG: hello-v${{ github.run_number }}
-
 jobs:
 
   build:
 
-    name: Build & Push Image
+    name: Build & Push Docker Image
     runs-on: ubuntu-latest
 
     steps:
@@ -35,14 +32,40 @@ jobs:
           | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
 
 
+      - name: Get Latest Image Tag
+        id: get_tag
+        run: |
+
+          REPO=${{ secrets.ECR_REPOSITORY }}
+          REGION=${{ secrets.AWS_REGION }}
+
+          echo "Fetching latest image tag..."
+
+          LATEST_TAG=$(aws ecr describe-images \
+            --repository-name $REPO \
+            --region $REGION \
+            --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' \
+            --output text)
+
+          echo "Latest tag: $LATEST_TAG"
+
+          if [[ "$LATEST_TAG" == "None" ]]; then
+            NEW_TAG="0.0.0.1"
+          else
+            VERSION=$(echo $LATEST_TAG | awk -F. '{print $4+1}')
+            NEW_TAG="0.0.0.$VERSION"
+          fi
+
+          echo "New tag: $NEW_TAG"
+
+          echo "IMAGE_TAG=$NEW_TAG" >> $GITHUB_ENV
+
+
       - name: Build Docker Image
         run: |
           docker build -t ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${IMAGE_TAG} .
-          docker tag ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${IMAGE_TAG} \
-                     ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
 
 
       - name: Push Image to ECR
         run: |
           docker push ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${IMAGE_TAG}
-          docker push ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
