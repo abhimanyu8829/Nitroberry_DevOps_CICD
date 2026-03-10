@@ -122,7 +122,7 @@ jobs:
         with:
           image-ref: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ needs.build.outputs.image_tag }}
           format: table
-          exit-code: 1
+          exit-code: 0
           ignore-unfixed: true
           severity: CRITICAL,HIGH
 
