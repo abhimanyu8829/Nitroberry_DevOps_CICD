@@ -16,10 +16,9 @@ permissions:
   contents: read
 
 jobs:
-
-# ──────────────────────────────────────────────
-# JOB 1 — Lint & Code Checks
-# ──────────────────────────────────────────────
+  # ──────────────────────────────────────────────
+  # JOB 1 — Lint & Code Checks
+  # ──────────────────────────────────────────────
   lint:
     name: Lint & Format Check
     runs-on: ubuntu-latest
@@ -42,10 +41,9 @@ jobs:
       - name: Run ESLint
         run: npx eslint .
 
-
-# ──────────────────────────────────────────────
-# JOB 2 — Build Docker Image
-# ──────────────────────────────────────────────
+  # ──────────────────────────────────────────────
+  # JOB 2 — Build Docker Image
+  # ──────────────────────────────────────────────
   build:
     name: Build Docker Image
     runs-on: ubuntu-latest
@@ -70,10 +68,9 @@ jobs:
           -t $IMAGE_NAME:${{ steps.tag.outputs.TAG }} \
           -t $IMAGE_NAME:latest .
 
-
-# ──────────────────────────────────────────────
-# JOB 3 — Security Scan
-# ──────────────────────────────────────────────
+  # ──────────────────────────────────────────────
+  # JOB 3 — Security Scan
+  # ──────────────────────────────────────────────
   scan:
     name: Security Scan (Trivy)
     runs-on: ubuntu-latest
@@ -97,10 +94,9 @@ jobs:
           ignore-unfixed: true
           severity: CRITICAL,HIGH
 
-
-# ──────────────────────────────────────────────
-# JOB 4 — Push to ECR
-# ──────────────────────────────────────────────
+  # ──────────────────────────────────────────────
+  # JOB 4 — Push to ECR
+  # ──────────────────────────────────────────────
   push:
     name: Push Image to ECR
     runs-on: ubuntu-latest
