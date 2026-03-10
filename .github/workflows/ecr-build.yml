@@ -17,7 +17,6 @@ env:
   IMAGE_NAME: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}
 
 jobs:
-
   # ──────────────────────────────────────────────
   # JOB 1 — Lint & Test
   # ──────────────────────────────────────────────
@@ -54,7 +53,6 @@ jobs:
 
       - name: Run Tests
         run: npm test || true
-
 
   # ──────────────────────────────────────────────
   # JOB 2 — Build Docker Image
@@ -101,7 +99,6 @@ jobs:
           path: image.tar.gz
           retention-days: 1
 
-
   # ──────────────────────────────────────────────
   # JOB 3 — Security Scan
   # ──────────────────────────────────────────────
@@ -128,7 +125,6 @@ jobs:
           exit-code: 1
           ignore-unfixed: true
           severity: CRITICAL,HIGH
-
 
   # ──────────────────────────────────────────────
   # JOB 4 — Push to ECR
