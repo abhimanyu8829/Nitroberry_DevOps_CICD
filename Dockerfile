@@ -1,9 +1,9 @@
-FROM nginx:1.27-alpine
+FROM nginx:stable-alpine
 
-# Update Alpine packages to reduce vulnerabilities
-RUN apk update && apk upgrade --no-cache
+RUN apk upgrade --no-cache
 
-# Copy website content
 COPY index.html /usr/share/nginx/html/index.html
 
 EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
