@@ -146,10 +146,6 @@ jobs:
       - name: Load Docker Image
         run: docker load < image.tar.gz
 
-      - name: Tag Image as Latest
-        run: |
-          docker tag $IMAGE_NAME:${{ needs.build.outputs.image_tag }} $IMAGE_NAME:latest
-
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -165,7 +161,6 @@ jobs:
       - name: Push Image to ECR
         run: |
           docker push $IMAGE_NAME:${{ needs.build.outputs.image_tag }}
-          docker push $IMAGE_NAME:latest
 
       - name: Deployment Summary
         run: |
