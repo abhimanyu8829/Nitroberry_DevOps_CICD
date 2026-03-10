@@ -8,7 +8,7 @@ greet('Abhimanyu');
 
 // Example function
 function add(a, b) {
-  return a +b;
+  return a + b;
 }
 
 console.log('Sum:', add(5, 3));
