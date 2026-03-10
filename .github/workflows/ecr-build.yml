@@ -5,22 +5,40 @@ on:
     branches:
       - main
 
-env:
-  DOCKERFILE_NAME: Dockerfile.api
-
 jobs:
 
   build:
-
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
 
     steps:
 
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v3
 
 
+      # Install Node for lint tools
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+
+      - name: Install Dependencies
+        run: npm install
+
+
+      # Prettier Check
+      - name: Run Prettier
+        run: npx prettier --check .
+
+
+      # ESLint Check
+      - name: Run ESLint
+        run: npx eslint .
+
+
+      # Configure AWS
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -29,47 +47,20 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
 
+      # Login to ECR
       - name: Login to ECR
         run: |
           aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
           | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
 
 
-      - name: Get Latest Image Tag
-        id: get_tag
-        run: |
-
-          REPO=${{ secrets.ECR_REPOSITORY }}
-          REGION=${{ secrets.AWS_REGION }}
-
-          echo "Fetching latest image tag..."
-
-          LATEST_TAG=$(aws ecr describe-images \
-            --repository-name $REPO \
-            --region $REGION \
-            --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' \
-            --output text)
-
-          echo "Latest tag: $LATEST_TAG"
-
-          if [[ "$LATEST_TAG" == "None" ]]; then
-            NEW_TAG="0.0.0.1"
-          else
-            VERSION=$(echo $LATEST_TAG | awk -F. '{print $4+1}')
-            NEW_TAG="0.0.0.$VERSION"
-          fi
-
-          echo "New tag: $NEW_TAG"
-
-          echo "IMAGE_TAG=$NEW_TAG" >> $GITHUB_ENV
-
-
+      # Build Docker Image
       - name: Build Docker Image
         run: |
-          docker build -f $DOCKERFILE_NAME \
-          -t ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${IMAGE_TAG} .
+          docker build -t ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest .
 
 
+      # Push Docker Image
       - name: Push Image to ECR
         run: |
-          docker push ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${IMAGE_TAG}
+          docker push ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
