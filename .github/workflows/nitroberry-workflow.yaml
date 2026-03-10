@@ -1,0 +1,101 @@
+name: Build and Push Image to container registry
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+
+  build:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+
+    env:
+      DOCKER_FILE: dockerfile/Dockerfile.cron
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+
+      # Setup Node for lint & formatting
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+
+      # Install Dependencies
+      - name: Install Dependencies
+        run: npm install
+
+
+      # Prettier Formatting Check
+      - name: Run Prettier
+        run: npx prettier --check .
+
+
+      # ESLint Code Check
+      - name: Run ESLint
+        run: npx eslint .
+
+
+      # Configure AWS Credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+
+      # Login to Container Registry
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
+          | docker login --username AWS --password-stdin ${{ secrets.CR_ENDPOINT }}
+
+
+      # Get Latest Image Tag
+      - name: Get Latest Image Tag
+        id: get_tag
+        run: |
+
+          REPO=${{ secrets.CR_REPOSITORY_CRON }}
+          REGION=${{ secrets.AWS_REGION }}
+
+          echo "Fetching latest image tag..."
+
+          LATEST_TAG=$(aws ecr describe-images \
+            --repository-name $REPO \
+            --region $REGION \
+            --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' \
+            --output text)
+
+          echo "Latest tag: $LATEST_TAG"
+
+          if [[ "$LATEST_TAG" == "None" ]]; then
+            NEW_TAG="0.0.0.1"
+          else
+            VERSION=$(echo $LATEST_TAG | awk -F. '{print $4+1}')
+            NEW_TAG="0.0.0.$VERSION"
+          fi
+
+          echo "New tag: $NEW_TAG"
+
+          echo "IMAGE_TAG=$NEW_TAG" >> $GITHUB_ENV
+
+
+      # Build Docker Image
+      - name: Build Docker Image
+        run: |
+          docker build -f $DOCKER_FILE \
+          -t ${{ secrets.CR_ENDPOINT }}/${{ secrets.CR_REPOSITORY_CRON }}:${IMAGE_TAG} .
+
+
+      # Push Docker Image
+      - name: Push Image to ECR
+        run: |
+          docker push ${{ secrets.CR_ENDPOINT }}/${{ secrets.CR_REPOSITORY_CRON }}:${IMAGE_TAG}
