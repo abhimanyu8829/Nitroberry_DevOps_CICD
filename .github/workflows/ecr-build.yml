@@ -120,7 +120,7 @@ jobs:
         with:
           name: docker-image
           path: image.tar.gz
-          retention-days: 1
+          retention-hours: 1
 
   # ──────────────────────────────────────────────
   # JOB 3 — Security Scan
