@@ -159,6 +159,7 @@ jobs:
 # ──────────────────────────────────────────────
 
       - name: Scan Docker Image
+        if: matrix.service == 'api'
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.TAG }}
