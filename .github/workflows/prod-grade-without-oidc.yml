@@ -1,0 +1,201 @@
+name: Build and Push Image to Container Registry
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKER_FILE: dockerfile/Dockerfile.cron
+
+permissions:
+  contents: read
+
+jobs:
+  # ──────────────────────────────────────────────
+  # JOB 1: Lint & Test
+  # ──────────────────────────────────────────────
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4
+
+      - name: Setup Node
+        uses: actions/setup-node@5e21ff4d9bc1a8cf6de233a3057d20ec6b3fb69d # v3
+        with:
+          node-version: 18
+
+      - name: Cache Node Modules
+        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 # v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Prettier
+        run: npx prettier --check .
+
+      - name: Run ESLint
+        run: npx eslint .
+
+      - name: Run Tests
+        run: npm test
+
+  # ──────────────────────────────────────────────
+  # JOB 2: Build Docker Image
+  # ──────────────────────────────────────────────
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    outputs:
+      image_tag: ${{ steps.set_tag.outputs.IMAGE_TAG }}
+      full_image: ${{ steps.set_tag.outputs.FULL_IMAGE }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@010d0da01d0b5a38af31e9c3470dbfdabdecca3a # v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login_ecr
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2
+
+      - name: Compute Next Image Tag
+        id: set_tag
+        run: |
+          REPO=${{ secrets.CR_REPOSITORY_CRON }}
+          REGION=${{ secrets.AWS_REGION }}
+          ENDPOINT=${{ secrets.CR_ENDPOINT }}
+
+          echo "Fetching latest image tag..."
+          LATEST_TAG=$(aws ecr describe-images \
+            --repository-name "$REPO" \
+            --region "$REGION" \
+            --query 'sort_by(imageDetails, &imagePushedAt)[-1].imageTags' \
+            --output json 2>/dev/null \
+            | jq -r '.[]? | select(test("^0\\.0\\.0\\.[0-9]+$"))' \
+            | sort -t. -k4 -n \
+            | tail -n1 || echo "None")
+
+          echo "Latest tag: $LATEST_TAG"
+
+          if [[ -z "$LATEST_TAG" || "$LATEST_TAG" == "None" ]]; then
+            NEW_TAG="0.0.0.1"
+          else
+            PATCH=$(echo "$LATEST_TAG" | awk -F. '{print $4+1}')
+            NEW_TAG="0.0.0.$PATCH"
+          fi
+
+          echo "New tag: $NEW_TAG"
+          echo "IMAGE_TAG=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "FULL_IMAGE=$ENDPOINT/$REPO:$NEW_TAG" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 # v3
+
+      - name: Build Docker Image (no push yet)
+        uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 # v5
+        with:
+          context: .
+          file: ${{ env.DOCKER_FILE }}
+          push: false
+          load: true
+          tags: |
+            ${{ secrets.CR_ENDPOINT }}/${{ secrets.CR_REPOSITORY_CRON }}:${{ steps.set_tag.outputs.IMAGE_TAG }}
+            ${{ secrets.CR_ENDPOINT }}/${{ secrets.CR_REPOSITORY_CRON }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Save Docker Image as Artifact
+        run: |
+          docker save \
+            ${{ secrets.CR_ENDPOINT }}/${{ secrets.CR_REPOSITORY_CRON }}:${{ steps.set_tag.outputs.IMAGE_TAG }} \
+            | gzip > image.tar.gz
+
+      - name: Upload Image Artifact
+        uses: actions/upload-artifact@c7d193f32edcb7bfad88892161225aeda64e9392 # v4
+        with:
+          name: docker-image
+          path: image.tar.gz
+          retention-days: 1
+
+  # ──────────────────────────────────────────────
+  # JOB 3: Security Scan
+  # ──────────────────────────────────────────────
+  scan:
+    name: Security Scan (Trivy)
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download Image Artifact
+        uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf03d3c67110 # v4
+        with:
+          name: docker-image
+
+      - name: Load Docker Image
+        run: docker load < image.tar.gz
+
+      - name: Scan Docker Image with Trivy
+        uses: aquasecurity/trivy-action@a20de5420d57c4102486cdd9349b532bf5b12814
+        with:
+          image-ref: ${{ secrets.CR_ENDPOINT }}/${{ secrets.CR_REPOSITORY_CRON }}:${{ needs.build.outputs.image_tag }}
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+  # ──────────────────────────────────────────────
+  # JOB 4: Push to ECR
+  # ──────────────────────────────────────────────
+  push:
+    name: Push Image to ECR
+    runs-on: ubuntu-latest
+    needs: [build, scan]
+
+    steps:
+      - name: Download Image Artifact
+        uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf03d3c67110 # v4
+        with:
+          name: docker-image
+
+      - name: Load Docker Image
+        run: docker load < image.tar.gz
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@010d0da01d0b5a38af31e9c3470dbfdabdecca3a # v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2
+
+      - name: Push Image to ECR
+        run: |
+          docker push ${{ secrets.CR_ENDPOINT }}/${{ secrets.CR_REPOSITORY_CRON }}:${{ needs.build.outputs.image_tag }}
+          docker push ${{ secrets.CR_ENDPOINT }}/${{ secrets.CR_REPOSITORY_CRON }}:latest
+
+      - name: Summary
+        run: |
+          echo "### Image pushed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** \`${{ needs.build.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** \`${{ needs.build.outputs.full_image }}\`" >> $GITHUB_STEP_SUMMARY

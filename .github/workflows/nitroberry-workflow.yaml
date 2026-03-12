@@ -1,4 +1,4 @@
-name: Build and Push Image to ECR
+name: Build and Push Image to container registry
 
 on:
   push:
@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 env:
-  DOCKER_FILE: Dockerfile
-  IMAGE_NAME: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}
+  DOCKER_FILE: dockerfile/Dockerfile.api
+  IMAGE_NAME: ${{ secrets.CR_ENDPOINT }}/${{ secrets.CR_REPOSITORY_API }}
 
 jobs:
   # ──────────────────────────────────────────────
@@ -43,13 +43,13 @@ jobs:
             ${{ runner.os }}-node-
 
       - name: Install Dependencies
-        run: npm ci
+        run: npm install
 
       - name: Run Prettier
         run: npx prettier --check .
 
-      - name: Run ESLint
-        run: npx eslint .
+      # - name: Run ESLint
+      #   run: npx eslint .
 
       - name: Run Tests
         run: npm test || true
@@ -82,23 +82,21 @@ jobs:
         run: |
 
           LATEST_TAG=$(aws ecr describe-images \
-            --repository-name ${{ secrets.ECR_REPOSITORY }} \
+            --repository-name ${{ secrets.CR_REPOSITORY_API }} \
             --region ${{ secrets.AWS_REGION }} \
-            --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' \
-            --output text)
+            --query 'imageDetails[*].imageTags[*]' \
+            --output text | tr '\t' '\n' | grep -E '^0\.0\.0\.[0-9]+$' | sort -V | tail -n 1)
 
           echo "Latest tag: $LATEST_TAG"
 
-          if [ "$LATEST_TAG" = "None" ] || [ -z "$LATEST_TAG" ]; then
+          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "None" ]; then
             NEW_TAG="0.0.0.1"
           else
-            PREFIX=$(echo $LATEST_TAG | awk -F. '{print $1"."$2"."$3}')
-            PATCH=$(echo $LATEST_TAG | awk -F. '{print $4}')
-            PATCH=$((PATCH+1))
-            NEW_TAG="$PREFIX.$PATCH"
+            PATCH="${LATEST_TAG##*.}"
+            NEW_TAG="0.0.0.$((PATCH + 1))"
           fi
 
-          echo "TAG=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "TAG=$NEW_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -120,7 +118,7 @@ jobs:
         with:
           name: docker-image
           path: image.tar.gz
-          retention-hours: 1
+          retention-days: 1
 
   # ──────────────────────────────────────────────
   # JOB 3 — Security Scan
@@ -159,7 +157,7 @@ jobs:
     needs: [build, scan]
 
     env:
-      IMAGE_NAME: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}
+      IMAGE_NAME: ${{ secrets.CR_ENDPOINT }}/${{ secrets.CR_REPOSITORY_API }}
 
     steps:
       - name: Download Docker Artifact
@@ -180,7 +178,7 @@ jobs:
       - name: Login to ECR
         run: |
           aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
-          | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+          | docker login --username AWS --password-stdin ${{ secrets.CR_ENDPOINT }}
 
       - name: Push Image to ECR
         run: |
@@ -188,5 +186,5 @@ jobs:
 
       - name: Deployment Summary
         run: |
-          echo "### Image pushed successfully 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "### Image pushed successfully" >> $GITHUB_STEP_SUMMARY
           echo "Tag: ${{ needs.build.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY

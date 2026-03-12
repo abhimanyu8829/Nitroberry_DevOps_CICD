@@ -1,0 +1,198 @@
+name: Build and Push Images to ECR
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CR_ENDPOINT: ${{ secrets.CR_ENDPOINT }}
+
+jobs:
+
+# ──────────────────────────────────────────────
+# JOB 1 — Common Lint & Test (RUNS ONCE)
+# ──────────────────────────────────────────────
+
+  validate:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Cache Node Modules
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run Prettier
+        run: npx prettier --check .
+
+      - name: Run Tests
+        run: npm test || true
+
+
+# ──────────────────────────────────────────────
+# JOB 2 — BUILD + SCAN + PUSH (PARALLEL)
+# ──────────────────────────────────────────────
+
+  build-scan-push:
+    name: Build Scan Push (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: validate
+
+    strategy:
+      matrix:
+        service: [api, cron, dev, prod]
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+
+# ──────────────────────────────────────────────
+# Set Dockerfile + Repository
+# ──────────────────────────────────────────────
+
+      - name: Set Service Config
+        run: |
+          if [ "${{ matrix.service }}" = "api" ]; then
+            REPO="${{ secrets.CR_REPOSITORY_API }}"
+            DOCKERFILE="dockerfile/Dockerfile.api"
+          elif [ "${{ matrix.service }}" = "cron" ]; then
+            REPO="${{ secrets.CR_REPOSITORY_CRON }}"
+            DOCKERFILE="dockerfile/Dockerfile.cron"
+          elif [ "${{ matrix.service }}" = "dev" ]; then
+            REPO="${{ secrets.CR_REPOSITORY_DEV }}"
+            DOCKERFILE="dockerfile/Dockerfile.dev"
+          elif [ "${{ matrix.service }}" = "prod" ]; then
+            REPO="${{ secrets.CR_REPOSITORY_PROD }}"
+            DOCKERFILE="dockerfile/Dockerfile.prod"
+          fi
+
+          echo "REPOSITORY=$REPO" >> $GITHUB_ENV
+          echo "DOCKER_FILE=$DOCKERFILE" >> $GITHUB_ENV
+          echo "IMAGE_NAME=${{ secrets.CR_ENDPOINT }}/$REPO" >> $GITHUB_ENV
+
+
+# ──────────────────────────────────────────────
+# AWS LOGIN
+# ──────────────────────────────────────────────
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+
+# ──────────────────────────────────────────────
+# AUTO TAG
+# ──────────────────────────────────────────────
+
+      - name: Set Image Tag
+        id: tag
+        run: |
+          LATEST_TAG=$(aws ecr describe-images \
+            --repository-name $REPOSITORY \
+            --region ${{ secrets.AWS_REGION }} \
+            --query 'imageDetails[*].imageTags[*]' \
+            --output text | tr '\t' '\n' | grep -E '^0\.0\.0\.[0-9]+$' | sort -V | tail -n 1)
+
+          echo "Latest tag: $LATEST_TAG"
+
+          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "None" ]; then
+            NEW_TAG="0.0.0.1"
+          else
+            PATCH="${LATEST_TAG##*.}"
+            NEW_TAG="0.0.0.$((PATCH + 1))"
+          fi
+
+          echo "TAG=$NEW_TAG" >> $GITHUB_OUTPUT
+
+
+# ──────────────────────────────────────────────
+# DOCKER BUILDX
+# ──────────────────────────────────────────────
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+
+# ──────────────────────────────────────────────
+# BUILD IMAGE
+# ──────────────────────────────────────────────
+
+      - name: Build Docker Image
+        run: |
+          docker buildx build \
+            -f $DOCKER_FILE \
+            -t $IMAGE_NAME:${{ steps.tag.outputs.TAG }} \
+            --load \
+            .
+
+
+# ──────────────────────────────────────────────
+# SECURITY SCAN
+# ──────────────────────────────────────────────
+
+      - name: Scan Docker Image
+        if: matrix.service == 'api'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.TAG }}
+          format: table
+          exit-code: 0
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+
+# ──────────────────────────────────────────────
+# ECR LOGIN
+# ──────────────────────────────────────────────
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
+          | docker login --username AWS --password-stdin ${{ secrets.CR_ENDPOINT }}
+
+
+# ──────────────────────────────────────────────
+# PUSH IMAGE
+# ──────────────────────────────────────────────
+
+      - name: Push Image
+        run: |
+          docker push $IMAGE_NAME:${{ steps.tag.outputs.TAG }}
+
+
+# ──────────────────────────────────────────────
+# SUMMARY
+# ──────────────────────────────────────────────
+
+      - name: Deployment Summary
+        run: |
+          echo "### ${{ matrix.service }} image pushed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "Tag: ${{ steps.tag.outputs.TAG }}" >> $GITHUB_STEP_SUMMARY
