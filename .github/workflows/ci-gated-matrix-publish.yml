@@ -16,10 +16,9 @@ env:
   CR_ENDPOINT: ${{ secrets.CR_ENDPOINT }}
 
 jobs:
-
-# ──────────────────────────────────────────────
-# JOB 1 — Common Lint & Test (RUNS ONCE)
-# ──────────────────────────────────────────────
+  # ──────────────────────────────────────────────
+  # JOB 1 — Common Lint & Test (RUNS ONCE)
+  # ──────────────────────────────────────────────
 
   validate:
     name: Lint & Test
@@ -51,10 +50,9 @@ jobs:
       - name: Run Tests
         run: npm test || true
 
-
-# ──────────────────────────────────────────────
-# JOB 2 — BUILD + SCAN + PUSH (PARALLEL)
-# ──────────────────────────────────────────────
+  # ──────────────────────────────────────────────
+  # JOB 2 — BUILD + SCAN + PUSH (PARALLEL)
+  # ──────────────────────────────────────────────
 
   build-scan-push:
     name: Build Scan Push (${{ matrix.service }})
@@ -63,17 +61,15 @@ jobs:
 
     strategy:
       matrix:
-        service: [api, cron, dev, prod]
+        service: [api, socket, cron, worker]
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-
-# ──────────────────────────────────────────────
-# Set Dockerfile + Repository
-# ──────────────────────────────────────────────
+      # ──────────────────────────────────────────────
+      # Set Dockerfile + Repository
+      # ──────────────────────────────────────────────
 
       - name: Set Service Config
         run: |
@@ -83,22 +79,21 @@ jobs:
           elif [ "${{ matrix.service }}" = "cron" ]; then
             REPO="${{ secrets.CR_REPOSITORY_CRON }}"
             DOCKERFILE="dockerfile/Dockerfile.cron"
-          elif [ "${{ matrix.service }}" = "dev" ]; then
-            REPO="${{ secrets.CR_REPOSITORY_DEV }}"
-            DOCKERFILE="dockerfile/Dockerfile.dev"
-          elif [ "${{ matrix.service }}" = "prod" ]; then
-            REPO="${{ secrets.CR_REPOSITORY_PROD }}"
-            DOCKERFILE="dockerfile/Dockerfile.prod"
+          elif [ "${{ matrix.service }}" = "worker" ]; then
+            REPO="${{ secrets.CR_REPOSITORY_WORKER }}"
+            DOCKERFILE="dockerfile/Dockerfile.worker"
+          elif [ "${{ matrix.service }}" = "socket" ]; then
+            REPO="${{ secrets.CR_REPOSITORY_SOCKET }}"
+            DOCKERFILE="dockerfile/Dockerfile.socket"
           fi
 
           echo "REPOSITORY=$REPO" >> $GITHUB_ENV
           echo "DOCKER_FILE=$DOCKERFILE" >> $GITHUB_ENV
           echo "IMAGE_NAME=${{ secrets.CR_ENDPOINT }}/$REPO" >> $GITHUB_ENV
 
-
-# ──────────────────────────────────────────────
-# AWS LOGIN
-# ──────────────────────────────────────────────
+      # ──────────────────────────────────────────────
+      # AWS LOGIN
+      # ──────────────────────────────────────────────
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -107,10 +102,9 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-
-# ──────────────────────────────────────────────
-# AUTO TAG
-# ──────────────────────────────────────────────
+      # ──────────────────────────────────────────────
+      # AUTO TAG
+      # ──────────────────────────────────────────────
 
       - name: Set Image Tag
         id: tag
@@ -132,18 +126,16 @@ jobs:
 
           echo "TAG=$NEW_TAG" >> $GITHUB_OUTPUT
 
-
-# ──────────────────────────────────────────────
-# DOCKER BUILDX
-# ──────────────────────────────────────────────
+      # ──────────────────────────────────────────────
+      # DOCKER BUILDX
+      # ──────────────────────────────────────────────
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-
-# ──────────────────────────────────────────────
-# BUILD IMAGE
-# ──────────────────────────────────────────────
+      # ──────────────────────────────────────────────
+      # BUILD IMAGE
+      # ──────────────────────────────────────────────
 
       - name: Build Docker Image
         run: |
@@ -153,10 +145,9 @@ jobs:
             --load \
             .
 
-
-# ──────────────────────────────────────────────
-# SECURITY SCAN
-# ──────────────────────────────────────────────
+      # ──────────────────────────────────────────────
+      # SECURITY SCAN
+      # ──────────────────────────────────────────────
 
       - name: Scan Docker Image
         if: matrix.service == 'api'
@@ -168,29 +159,34 @@ jobs:
           ignore-unfixed: true
           severity: CRITICAL,HIGH
 
-
-# ──────────────────────────────────────────────
-# ECR LOGIN
-# ──────────────────────────────────────────────
+      # ──────────────────────────────────────────────
+      # ECR LOGIN
+      # ──────────────────────────────────────────────
 
       - name: Login to ECR
         run: |
           aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
           | docker login --username AWS --password-stdin ${{ secrets.CR_ENDPOINT }}
 
+      # ──────────────────────────────────────────────
+      # Add TAG
+      # ──────────────────────────────────────────────
 
-# ──────────────────────────────────────────────
-# PUSH IMAGE
-# ──────────────────────────────────────────────
+      - name: Add Tag
+        run: |
+          docker tag $IMAGE_NAME:${{ steps.tag.outputs.TAG }} $IMAGE_NAME:latest
+
+      # ──────────────────────────────────────────────
+      # PUSH IMAGE
+      # ──────────────────────────────────────────────
 
       - name: Push Image
         run: |
           docker push $IMAGE_NAME:${{ steps.tag.outputs.TAG }}
-
-
-# ──────────────────────────────────────────────
-# SUMMARY
-# ──────────────────────────────────────────────
+          docker push $IMAGE_NAME:latest
+      # ──────────────────────────────────────────────
+      # SUMMARY
+      # ──────────────────────────────────────────────
 
       - name: Deployment Summary
         run: |
