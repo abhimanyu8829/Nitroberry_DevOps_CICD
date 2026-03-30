@@ -25,7 +25,7 @@ services:
       - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
       # Let's Encrypt Configuration
       - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
-      - "--certificatesresolvers.myresolver.acme.email=YOUR_EMAIL@example.com" # TODO: Change to your email
+      - "--certificatesresolvers.myresolver.acme.email=abhimanyucentral@gmail.com"
       - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
@@ -38,13 +38,8 @@ services:
         constraints:
           - node.role == manager
       labels:
-        # Enable Traefik for itself (Dashboard) if needed
+        # Traefik dashboard is accessible on port 8080 because --api.insecure=true is set
         - "traefik.enable=true"
-        - "traefik.http.routers.traefik_dash.rule=Host(`traefik.YOUR_DOMAIN.com`)" # TODO: Change domain
-        - "traefik.http.routers.traefik_dash.entrypoints=websecure"
-        - "traefik.http.routers.traefik_dash.tls.certresolver=myresolver"
-        - "traefik.http.services.traefik_dash.loadbalancer.server.port=8080"
-        - "traefik.http.routers.traefik_dash.service=api@internal"
 
   nb-redis:
     image: redis:8-alpine
@@ -106,7 +101,7 @@ services:
         condition: any
       labels:
         - "traefik.enable=true"
-        - "traefik.http.routers.nbsocket.rule=Host(`socket.YOUR_DOMAIN.com`)" # TODO: Change domain
+        - "traefik.http.routers.nbsocket.rule=Host(`44.219.100.191`) && PathPrefix(`/socket`)"
         - "traefik.http.routers.nbsocket.entrypoints=websecure"
         - "traefik.http.routers.nbsocket.tls.certresolver=myresolver"
         - "traefik.http.services.nbsocket.loadbalancer.server.port=9090"
@@ -130,7 +125,7 @@ services:
         condition: any
       labels:
         - "traefik.enable=true"
-        - "traefik.http.routers.nbapi.rule=Host(`api.YOUR_DOMAIN.com`)" # TODO: Change domain
+        - "traefik.http.routers.nbapi.rule=Host(`44.219.100.191`)"
         - "traefik.http.routers.nbapi.entrypoints=websecure"
         - "traefik.http.routers.nbapi.tls.certresolver=myresolver"
         - "traefik.http.services.nbapi.loadbalancer.server.port=80"
@@ -202,7 +197,7 @@ services:
       labels:
         # Exposing Grafana via Traefik as an example
         - "traefik.enable=true"
-        - "traefik.http.routers.grafana.rule=Host(`grafana.YOUR_DOMAIN.com`)" # TODO: Change domain
+        - "traefik.http.routers.grafana.rule=Host(`44.219.100.191`) && PathPrefix(`/grafana`)"
         - "traefik.http.routers.grafana.entrypoints=websecure"
         - "traefik.http.routers.grafana.tls.certresolver=myresolver"
         - "traefik.http.services.grafana.loadbalancer.server.port=3000"
