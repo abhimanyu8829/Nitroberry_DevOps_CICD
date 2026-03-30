@@ -40,14 +40,14 @@ services:
       - nb_network
 
   nb-worker:
-    image: ${CR_REGISTRY:-fallback}/nitroberry/nb-worker:latest
+    image: ${CR_REGISTRY:-fallback}/nitroberry:latest
     env_file:
       - ./.prod/prod.api.env
     networks:
       - nb_network
 
   nb-cron:
-    image: ${CR_REGISTRY:-fallback}/nitroberry/nb-cron:latest
+    image: ${CR_REGISTRY:-fallback}/nitroberry:latest
     env_file:
       - ./.prod/prod.api.env
     networks:
@@ -57,13 +57,13 @@ services:
         constraints: [node.role == manager]
 
   nb-socket:
-    image: ${CR_REGISTRY:-fallback}/nitroberry/nb-socket:latest
+    image: ${CR_REGISTRY:-fallback}/nitroberry:latest
     env_file:
       - ./.prod/prod.api.env
     networks:
       - nb_network
     deploy:
-      replicas: 2
+      replicas: 1
       labels:
         - "traefik.enable=true"
         # Since we use an IP, separate it using PathPrefix
@@ -73,13 +73,13 @@ services:
         - "traefik.http.services.socket.loadbalancer.sticky.cookie.name=socket_sticky"
 
   nb-api:
-    image: ${CR_REGISTRY:-fallback}/nitroberry/nb-api:latest
+    image: ${CR_REGISTRY:-fallback}/nitroberry:latest
     env_file:
       - ./.prod/prod.api.env
     networks:
       - nb_network
     deploy:
-      replicas: 4
+      replicas: 1
       resources:
         limits:
           cpus: '0.5'
@@ -91,53 +91,10 @@ services:
         - "traefik.http.services.api.loadbalancer.server.port=80"
         - "traefik.http.routers.api.middlewares=rate-limit@file,secure-headers@file"
 
-  nb-loki:
-    image: grafana/loki:2.9.0
-    command: -config.file=/etc/loki/local-config.yaml
-    volumes:
-      - ./observability/loki-config.yaml:/etc/loki/local-config.yaml
-      - loki_data:/tmp/loki
-    networks:
-      - monitoring
-
-  nb-promtail:
-    image: grafana/promtail:2.9.0
-    command: -config.file=/etc/promtail/config.yaml
-    volumes:
-      - ./observability/promtail-config.yaml:/etc/promtail/config.yaml
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-    networks:
-      - monitoring
-    deploy:
-      mode: global
-
-  nb-prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./observability/prometheus-config.yaml:/etc/prometheus/prometheus.yaml
-    networks:
-      - monitoring
-
-  grafana:
-    image: grafana/grafana:latest
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    networks:
-      - monitoring
-    deploy:
-      labels:
-        - "traefik.enable=true"
-        # Grafana requires specific path adjustments when served under a subpath
-        - "traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)"
-        - "traefik.http.services.grafana.loadbalancer.server.port=3000"
-
+# Removed Loki and Grafana volumes
 volumes:
   redis_data:
-  loki_data:
 
 networks:
   nb_network:
-    driver: overlay
-  monitoring:
     driver: overlay
