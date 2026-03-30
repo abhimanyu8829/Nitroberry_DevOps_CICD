@@ -21,7 +21,8 @@ aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS 
 
 echo "Deploying Nitroberry to Docker Swarm..."
 # Using --with-registry-auth to pass tokens down to all swarm worker nodes securely
-docker stack deploy -c docker-compose.yml nitroberry --with-registry-auth
+# The --prune flag ensures it actively kills any removed services (like metrics/sockets)
+docker stack deploy -c docker-compose.yml nitroberry --with-registry-auth --prune
 
 echo "Deployment submitted! Verification:"
 docker service ls

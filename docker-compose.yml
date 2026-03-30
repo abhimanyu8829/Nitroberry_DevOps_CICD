@@ -23,7 +23,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-    # Note: HTTPS (port 443) and Let's Encrypt volumes omitted since dealing with raw IP
 
   nb-redis:
     image: redis:8-alpine
@@ -39,39 +38,6 @@ services:
     networks:
       - nb_network
 
-  nb-worker:
-    image: ${CR_REGISTRY:-fallback}/nitroberry:latest
-    env_file:
-      - ./.prod/prod.api.env
-    networks:
-      - nb_network
-
-  nb-cron:
-    image: ${CR_REGISTRY:-fallback}/nitroberry:latest
-    env_file:
-      - ./.prod/prod.api.env
-    networks:
-      - nb_network
-    deploy:
-      placement:
-        constraints: [node.role == manager]
-
-  nb-socket:
-    image: ${CR_REGISTRY:-fallback}/nitroberry:latest
-    env_file:
-      - ./.prod/prod.api.env
-    networks:
-      - nb_network
-    deploy:
-      replicas: 1
-      labels:
-        - "traefik.enable=true"
-        # Since we use an IP, separate it using PathPrefix
-        - "traefik.http.routers.socket.rule=PathPrefix(`/socket`)"
-        - "traefik.http.services.socket.loadbalancer.server.port=9090"
-        - "traefik.http.services.socket.loadbalancer.sticky.cookie=true"
-        - "traefik.http.services.socket.loadbalancer.sticky.cookie.name=socket_sticky"
-
   nb-api:
     image: ${CR_REGISTRY:-fallback}/nitroberry:latest
     env_file:
@@ -79,19 +45,17 @@ services:
     networks:
       - nb_network
     deploy:
-      replicas: 1
+      replicas: 4
       resources:
         limits:
           cpus: '0.5'
           memory: 512M
       labels:
         - "traefik.enable=true"
-        # The main API is available on the root path of the IP
         - "traefik.http.routers.api.rule=PathPrefix(`/`)"
         - "traefik.http.services.api.loadbalancer.server.port=80"
         - "traefik.http.routers.api.middlewares=rate-limit@file,secure-headers@file"
 
-# Removed Loki and Grafana volumes
 volumes:
   redis_data:
 
