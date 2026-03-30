@@ -45,7 +45,7 @@ services:
     networks:
       - nb_network
     deploy:
-      replicas: 4
+      replicas: 1
       resources:
         limits:
           cpus: '0.5'
