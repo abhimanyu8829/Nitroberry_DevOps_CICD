@@ -8,5 +8,9 @@
   "scripts": {
     "lint": "eslint .",
     "format": "prettier --check ."
+  },
+  "dependencies": {
+    "docker": "^1.0.0",
+    "swarm": "^0.3.25"
   }
 }
