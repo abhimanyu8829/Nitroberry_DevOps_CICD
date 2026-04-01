@@ -1,4 +1,5 @@
-services:
+﻿f = open('docker-compose.yml', 'w')
+f.write("""services:
   traefik:
     image: traefik:v2.10
     command:
@@ -27,3 +28,6 @@ services:
 networks:
   app-network:
     driver: bridge
+""")
+f.close()
+print('OK')

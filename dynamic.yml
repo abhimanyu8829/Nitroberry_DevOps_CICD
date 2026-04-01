@@ -1,0 +1,36 @@
+﻿http:
+  routers:
+    api:
+      rule: PathPrefix("/")
+      entryPoints:
+        - web
+      service: api
+      middlewares:
+        - rate-limit
+        - security-headers
+  
+  services:
+    api:
+      loadBalancer:
+        servers:
+          - url: http://nitroberry_devops_cicd-api1-1:80
+          - url: http://nitroberry_devops_cicd-api2-1:80
+          - url: http://nitroberry_devops_cicd-api3-1:80
+  
+  middlewares:
+    rate-limit:
+      rateLimit:
+        average: 10
+        burst: 5
+        period: 1m
+    
+    security-headers:
+      headers:
+        frameDeny: true
+        sslRedirect: false
+        browserXssFilter: true
+        contentTypeNosniff: true
+        forceSTSHeader: false
+        stsIncludeSubdomains: false
+        stsPreload: false
+        stsSeconds: 0
