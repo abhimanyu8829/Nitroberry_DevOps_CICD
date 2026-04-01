@@ -1,57 +1,113 @@
-version: "3.8"
+version: '3.8'
+
+networks:
+  public:
+    external: true
+  private:
+    external: true
 
 services:
   traefik:
-    image: traefik:v2.10
-    command:
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.swarmMode=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
+    image: traefik:v3.0
     ports:
-      - target: 80
-        published: 80
-        protocol: tcp
-        mode: ingress
+      - "80:80"
+      - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
     networks:
-      - nb_network
+      - public
+      - private
     deploy:
       mode: global
-      labels:
-        - "traefik.enable=false"
-
-  nb-redis:
-    image: redis:8-alpine
-    hostname: ${REDIS_HOST:-nb-redis}
-    volumes:
-      - redis_data:/data
-    command: redis-server --requirepass ${REDIS_PASSWORD:-safepassword} --port ${REDIS_PORT:-6379}
-    networks:
-      - nb_network
-    deploy:
-      labels:
-        - "traefik.enable=false"
-
-  nb-api:
-    image: ${CR_REGISTRY:-fallback}/nitroberry:latest
-    env_file:
-      - ./.prod/prod.api.env
-    networks:
-      - nb_network
-    deploy:
-      replicas: 1
       labels:
         - "traefik.enable=true"
         - "traefik.http.routers.api.rule=PathPrefix(`/`)"
         - "traefik.http.routers.api.entrypoints=web"
+        - "traefik.http.routers.api.middlewares=rate-limit@file"
+
+  nb-api:
+    image: nginx:alpine
+    networks:
+      - private
+    deploy:
+      mode: replicated
+      replicas: 4
+      labels:
+        - "traefik.enable=true"
         - "traefik.http.services.api.loadbalancer.server.port=80"
+        - "traefik.http.routers.api.service=api"
 
-volumes:
-  redis_data:
+  nb-redis:
+    image: redis:alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    networks:
+      - private
+    deploy:
+      replicas: 1
 
-networks:
-  nb_network:
-    driver: overlay
+  nb-worker:
+    image: alpine:latest
+    command: sleep infinity
+    networks:
+      - private
+    deploy:
+      replicas: 1
+
+  nb-cron:
+    image: alpine:latest
+    command: sleep infinity
+    networks:
+      - private
+    deploy:
+      replicas: 1
+
+  nb-socket:
+    image: alpine:latest
+    command: sleep infinity
+    networks:
+      - private
+    deploy:
+      replicas: 1
+
+  nb-prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    networks:
+      - private
+    deploy:
+      replicas: 1
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - private
+    deploy:
+      replicas: 1
+
+  nb-loki:
+    image: grafana/loki:2.9.0
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - private
+    deploy:
+      replicas: 1
+
+  nb-promtail:
+    image: grafana/promtail:2.9.0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yaml
+    networks:
+      - private
+    deploy:
+      mode: global

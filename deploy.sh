@@ -3,26 +3,29 @@ set -e
 
 # Load environment variables
 if [ -f .env ]; then
-  export $(cat .env | grep -v '^#' | xargs)
-else
-  echo "WARNING: .env file not found. Falling back to default system environments."
+  export $(grep -v '^#' .env | xargs)
 fi
 
-if [ -z "$CR_REGISTRY" ]; then
-  echo "Error: CR_REGISTRY is missing. Please set it in .env"
-  exit 1
-fi
+echo "Creating overlay networks..."
+docker network create --driver overlay public 2>/dev/null || true
+docker network create --driver overlay private 2>/dev/null || true
 
-AWS_REGION=$(echo "$CR_REGISTRY" | cut -d'.' -f4)
+echo "Deploying the stack..."
+docker stack deploy -c docker-compose.yml nb-stack
 
-echo "AWS ECR Login using region: $AWS_REGION..."
-# ECR Authentication (requires IAM role on EC2 OR 'aws configure')
-aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$CR_REGISTRY"
+echo "------------------------------------------------"
+echo "Deployment successful!"
+echo "Public IP: $PUBLIC_IP"
+echo ""
+echo "Access URLs:"
+echo "  API: http://$PUBLIC_IP/"
+echo "  Traefik Dashboard: http://$PUBLIC_IP:8080"
+echo "  Prometheus: http://$PUBLIC_IP:9090"
+echo "  Grafana: http://$PUBLIC_IP:3000 (admin/admin)"
+echo ""
+echo "Check services:"
+docker stack services nb-stack
 
-echo "Deploying Nitroberry to Docker Swarm..."
-# Using --with-registry-auth to pass tokens down to all swarm worker nodes securely
-# The --prune flag ensures it actively kills any removed services (like metrics/sockets)
-docker stack deploy -c docker-compose.yml nitroberry --with-registry-auth --prune
-
-echo "Deployment submitted! Verification:"
-docker service ls
+echo ""
+echo "Check API containers (should show 4 replicas):"
+docker service ps nb-stack_nb-api

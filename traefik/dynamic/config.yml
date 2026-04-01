@@ -4,13 +4,7 @@ http:
       rateLimit:
         average: 100
         burst: 50
-        period: 1m
-    secure-headers:
-      headers:
-        sslRedirect: true
-        stsSeconds: 31536000
-        browserXssFilter: true
-        contentTypeNosniff: true
-        forceSTSHeader: true
-        stsIncludeSubdomains: true
-        stsPreload: true
+    auth:
+      basicAuth:
+        users:
+          - "admin:$$2y$$10$$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi"
