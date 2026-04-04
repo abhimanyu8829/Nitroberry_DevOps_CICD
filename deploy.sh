@@ -7,8 +7,10 @@ if [ -f .env ]; then
 fi
 
 echo "Creating overlay networks..."
-docker network create --driver overlay public 2>/dev/null || true
-docker network create --driver overlay private 2>/dev/null || true
+docker network create --driver overlay nb_network 2>/dev/null || true
+
+echo "Setting permissions..."
+chmod +x autoscale.sh 2>/dev/null || true
 
 echo "Deploying the stack..."
 docker stack deploy -c docker-compose.yml nb-stack
