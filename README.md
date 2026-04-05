@@ -1,51 +1,95 @@
-# Nitroberry DevOps - Traefik Production Stack
+# 🚀 Nitroberry DevOps - Traefik & Swarm Production Stack
 
-**Project Status:** ✅ PRODUCTION READY
-**Architecture:** Traefik v3 API Gateway + Docker Swarm (SSL Auto-renewal)
-**Autoscaling:** Horizontal Scaling (2-10 Replicas, 70% threshold)
+[![Docker Swarm](https://img.shields.io/badge/Orchestration-Docker_Swarm-blue.svg)](https://docs.docker.com/engine/swarm/)
+[![Traefik v3](https://img.shields.io/badge/Gateway-Traefik_v3-blueviolet.svg)](https://doc.traefik.io/traefik/)
+[![SSL](https://img.shields.io/badge/SSL-Auto_LetsEncrypt-green.svg)](https://letsencrypt.org/)
+
+This repository contains the production-ready infrastructure for **Nitroberry**, featuring an automated API gateway, auto-renewing SSL certificates, and intelligent horizontal autoscaling.
 
 ---
 
-## ⚡ Step-by-Step Deployment (For Freshers)
+## 🚦 How Traffic is Managed
 
-Follow these exact steps to deploy the stack on a fresh AWS EC2 instance.
+Traefik acts as the entry point for all incoming traffic. It automatically distributes requests across all running API containers using a **Round Robin** algorithm.
 
-### 1. Prepare your AWS EC2
-- **Instance Type:** Minimum `t3.medium` (2 vCPU, 4GB RAM).
-- **Security Group:** Open ports `80` (HTTP), `443` (HTTPS), and `22` (SSH).
-- **Docker Installation:**
-  ```bash
-  sudo apt update && sudo apt install docker.io -y
-  sudo usermod -aG docker $USER && newgrp docker
-  ```
-
-### 2. Clone and Enter Project
-```bash
-git clone https://github.com/abhimanyu8829/Nitroberry_DevOps_CICD.git
-cd Nitroberry_DevOps_CICD
+### Traffic Flow Diagram
+```text
+                    ┌─────────────────────────────────────┐
+                    │           INCOMING REQUESTS          │
+                    │      https://api.yourdomain.com     │
+                    └─────────────────┬───────────────────┘
+                                      │
+                                      ▼
+                    ┌─────────────────────────────────────┐
+                    │            TRAEFIK (Port 443)       │
+                    │         Round Robin Load Balancer   │
+                    └─────────────────┬───────────────────┘
+                                      │
+        ┌─────────────────────────────┼─────────────────────────────┐
+        │                             │                             │
+        ▼                             ▼                             ▼
+┌───────────────┐             ┌───────────────┐             ┌───────────────┐
+│   API Pod 1   │             │   API Pod 2   │             │   API Pod 3   │
+│  (Container)  │             │  (Container)  │             │  (Container)  │
+└───────────────┘             └───────────────┘             └───────────────┘
 ```
 
-### 3. Configure Environment (`.env`)
-Create your production `.env` file and update these **3 key values**:
+**Key Benefits:**
+- **Even Distribution:** No single container is overloaded while others sit idle.
+- **Auto-Discovery:** Whenever a new container is added via autoscaling, Traefik detects it instantly via the Docker Socket and starts sending traffic.
+- **Self-Healing:** If a container fails, Traefik stops sending traffic to it immediately.
+
+---
+
+## 📊 Understanding `API_REPLICAS`
+
+The `API_REPLICAS` variable in your `.env` file controls the **baseline** for your API service.
+
+| Value | Meaning |
+| :--- | :--- |
+| **API_REPLICAS=2** | Start with 2 containers (Minimum for High Availability) |
+| **API_REPLICAS=5** | Start with 5 containers (For expected heavy initial load) |
+
+### Replicas & Autoscaling Logic
+Only the `nb-api` service is configured for horizontal scaling.
+
+- **Initial State:** Runs `${API_REPLICAS}` containers (Default: 2).
+- **High Load (> 70% CPU):** Autoscaler adds more replicas (Up to **10**).
+- **Low Load (< 30% CPU):** Autoscaler removes replicas (Down to **API_REPLICAS**).
+
+> [!NOTE]
+> Other services (`nb-worker`, `nb-cron`, `nb-socket`, `nb-redis`, `traefik`) run as **fixed single containers** to preserve resources and maintain state when necessary.
+
+---
+
+## 📈 Production Container Count
+
+Depending on your traffic, the total number of containers in your EC2 instance will change:
+
+| Scenario | API Containers | Total Stack Containers |
+| :--- | :--- | :--- |
+| **Idle / Normal** | 2 | 7 |
+| **Medium Load** | 4 - 6 | 9 - 11 |
+| **Peak Traffic** | 10 (Max) | 15 |
+
+---
+
+## 🛠️ Quick Start Deployment
+
+### 1. Environment Setup
 ```bash
 cp .env.template .env
-nano .env
+nano .env # Set your DOMAIN, ECR Registry, and API_REPLICAS
 ```
-**Required Changes:**
-- `DOMAIN`: Change to your actual domain (e.g., `api.nitroberry.com`)
-- `LETSENCRYPT_EMAIL`: Your email for SSL renewal alerts.
-- `CR_REGISTRY`: Your AWS ECR URI (e.g., `12345678.dkr.ecr.us-east-1.amazonaws.com`)
 
-### 4. Deploy the Stack
-Initialize Swarm mode and run the unified deployment script.
+### 2. Deploy the Stack
 ```bash
 docker swarm init
 chmod +x deploy.sh
 ./deploy.sh
 ```
 
-### 5. Start Autoscaling
-This script will keep your API running between 2 and 10 replicas based on traffic.
+### 3. Activate Autoscaling
 ```bash
 chmod +x autoscale.sh
 nohup ./autoscale.sh > autoscale.log 2>&1 &
@@ -53,35 +97,27 @@ nohup ./autoscale.sh > autoscale.log 2>&1 &
 
 ---
 
-## 📊 Stack Overview
+## ⚙️ Service Catalog
 
-### Service Architecture
-| Service | Image | Role | Replicas |
+| Service | Expose | Internal Port | Scalable? |
 | :--- | :--- | :--- | :--- |
-| **traefik** | `traefik:v3.0` | Gateway & SSL Termination | 1 |
-| **nb-api** | `${CR_REGISTRY}/nb-api` | Main API Service | **2 - 10** |
-| **nb-worker** | `${CR_REGISTRY}/nb-worker` | Background Tasks | 1 |
-| **nb-cron** | `${CR_REGISTRY}/nb-cron` | CRON Engine | 1 |
-| **nb-socket** | `${CR_REGISTRY}/nb-socket` | WebSockets | 1 |
-| **nb-redis** | `redis:8-alpine` | Cache / Session Store | 1 |
-
-### Autoscaling Configuration
-| Parameter | Value | Description |
-| :--- | :--- | :--- |
-| **Scale Up** | > 70% CPU | Adds 1 replica (up to 10) |
-| **Scale Down** | < 30% CPU | Removes 1 replica (down to 2) |
-| **Check Period** | 30 Seconds | Frequency of CPU health checks |
+| **traefik** | `80`, `443` | - | ❌ No |
+| **nb-api** | `DOMAIN` | `80` | ✅ **Yes (2-10)** |
+| **nb-socket** | `socket.DOMAIN` | `9090` | ❌ No |
+| **nb-worker** | - | - | ❌ No |
+| **nb-cron** | - | - | ❌ No |
+| **nb-redis** | - | `6379` | ❌ No |
 
 ---
 
-## 🔁 Production Management
+## 🔁 Management Commands
+
 | Action | Command |
 | :--- | :--- |
-| **Check Status** | `docker stack services nb-stack` |
-| **View API Logs** | `docker service logs -f nb-stack_nb-api` |
-| **View Gateway Logs** | `docker service logs -f nb-stack_traefik` |
-| **HTTPS Dashboard** | `https://traefik.yourdomain.com` |
-| **Monitor Replicas** | `docker service ps nb-stack_nb-api` |
+| **Monitor Replicas** | `docker service ls` |
+| **View Live Traffic** | `https://traefik.${DOMAIN}` |
+| **Check API Health** | `docker service ps nb-stack_nb-api` |
+| **Restart Stack** | `./deploy.sh` |
 
 ---
-*Maintained by the Nitroberry DevOps Team*
+*Developed for Nitroberry Production Environments*

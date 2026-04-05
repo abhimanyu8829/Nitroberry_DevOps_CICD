@@ -22,7 +22,7 @@ providers:
     exposedByDefault: false
     network: nb_network
   file:
-    filename: /config.yml
+    filename: /traefik.yml
     watch: true
 
 certificatesResolvers:
@@ -32,12 +32,6 @@ certificatesResolvers:
       storage: acme.json
       httpChallenge:
         entryPoint: http
-      # For Cloudflare DNS (recommended for wildcard certs)
-      # dnsChallenge:
-      #   provider: cloudflare
-      #   resolvers:
-      #     - "1.1.1.1:53"
-      #     - "1.0.0.1:53"
 
 log:
   level: INFO
@@ -47,3 +41,19 @@ accessLog:
   filePath: /var/log/traefik/access.log
   format: json
   bufferingSize: 100
+
+http:
+  routers:
+    dashboard:
+      rule: PathPrefix(`/`) || PathPrefix(`/dashboard`)
+      entryPoints:
+        - traefik
+      service: api@internal
+      middlewares:
+        - traefik-auth
+
+  middlewares:
+    traefik-auth:
+      basicAuth:
+        users:
+          - admin:$2y$05$shd4GdFEbdulweMyPfZYkuVU0fXXBiJNebkdz9lDGfqD6oKEmE.ZW
