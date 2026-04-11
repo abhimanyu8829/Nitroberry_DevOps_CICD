@@ -45,7 +45,7 @@ graph TD
     subgraph "Edge Gateway"
         Traefik --- Certs[(🔒 Let's Encrypt ACME)]
         Traefik --- Dashboard[📊 Traefik Dashboard :8080]
-        Traefik --- Auth[🔐 Basic Auth]
+        Traefik --- Auth[🔐 Basic Auth / JWT]
     end
 
     %% Service Cluster
@@ -88,6 +88,24 @@ Traefik acts as the intelligent entry point, automatically discovering services 
 2.  **SSL Termination**: Traefik automatically negotiates and renews TLS certificates via Let's Encrypt (HTTP-01 challenge).
 3.  **Self-healing**: Container failures are detected instantly; Traefik stops routing to unhealthy nodes without downtime.
 4.  **WebSocket Support**: Optimized path for `socket.${DOMAIN}` connecting directly to the `nb-socket` service.
+5.  **Edge JWT Validation**: Traefik intercepts all requests to protected routes, validates the JWT signature/expiry, and forwards user claims to the backend.
+
+---
+
+## 🔐 Edge JWT Authentication
+
+The Nitroberry stack offloads authentication from the backend services to the Traefik Gateway using a specialized middleware plugin.
+
+### How it Works:
+- **Public Routes**: `/login`, `/health`, and `/api/public/*` are accessible without a token.
+- **Protected Routes**: All other routes require a valid `Authorization: Bearer <token>` header.
+- **Claim Forwarding**: Once validated, Traefik injects the following headers into the request before it reaches the backend:
+    - `X-User-ID`: From the `sub` claim.
+    - `X-User-Email`: From the `email` claim.
+    - `X-User-Roles`: From the `roles` claim.
+
+> [!IMPORTANT]
+> Your backend APIs no longer need to verify JWT tokens manually. They should trust the `X-User-*` headers injected by Traefik.
 
 ---
 
@@ -181,6 +199,8 @@ Since your images are stored in a private registry, you must authenticate your E
     - `DOMAIN`: Your base domain (e.g., `nitroberry.com`).
     - `LETSENCRYPT_EMAIL`: Your email for SSL notifications.
     - `REDIS_PASSWORD`: A random secure string.
+    - `JWT_SECRET`: The symmetric key used to sign your HS256 tokens.
+    - `JWT_AUDIENCE`: Expected audience (default: `nitroberry-api`).
 
 ### Phase 5: Launch the Stack
 Run the automated deployment script. It handles network creation and stack deployment.
@@ -218,5 +238,7 @@ nohup ./autoscale.sh > autoscale.log 2>&1 &
 | `0/2 replicas` | Images not pulled or wrong version | Check ECR for correct tags |
 | `certificate error` | SSL not issued yet | Wait 2-3 minutes, check email |
 | `port 8080 refused` | Traefik not running | Run `docker service ps nb-stack_traefik` |
+| `401 Unauthorized (JWT)` | Invalid or missing token | Check `JWT_SECRET` in `.env` or token expiry |
+| `403 Forbidden` | Expired or invalid claims | Ensure token has correct `aud` and `iss` claims |
 ---
 *Maintained by Nitroberry DevOps Team*

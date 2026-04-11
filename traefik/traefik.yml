@@ -2,6 +2,12 @@ api:
   dashboard: true
   debug: false
 
+experimental:
+  plugins:
+    jwt-validator:
+      moduleName: "github.com/sdbenard/jwt-validator"
+      version: "v0.4.1"
+
 entryPoints:
   http:
     address: ":80"
@@ -57,3 +63,19 @@ http:
       basicAuth:
         users:
           - admin:$2y$05$shd4GdFEbdulweMyPfZYkuVU0fXXBiJNebkdz9lDGfqD6oKEmE.ZW
+
+    jwt-auth:
+      plugin:
+        jwt-validator:
+          headerName: Authorization
+          headerValuePrefix: Bearer 
+          algorithms:
+            - HS256
+          secret: "${JWT_SECRET}"
+          # issuer: "${JWT_ISSUER}" # Optional: uncomment if you want to strictly validate issuer
+          claims:
+            aud: ["${JWT_AUDIENCE}"]
+          headerInjections:
+            X-User-ID: sub
+            X-User-Email: email
+            X-User-Roles: roles

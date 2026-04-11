@@ -4,3 +4,5 @@ coverage
 traefik-local.yml
 docker-compose.local.yml
 traefik-simple.yml
+deploy.ps1
+.env.template
