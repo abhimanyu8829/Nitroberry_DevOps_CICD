@@ -188,3 +188,58 @@ jobs:
         run: |
           echo "### Image pushed successfully" >> $GITHUB_STEP_SUMMARY
           echo "Tag: ${{ needs.build.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+# Add this job at the end of your workflow file
+  helm-release:
+    name: Package and Push Helm Chart
+    runs-on: ubuntu-latest
+    needs: [build, push] # Wait for image to be pushed
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }} # PAT needed to push back to git
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Update Chart Version & Image Tag
+        id: versioning
+        run: |
+          CHART_FILE="kubernetes_nitroberry/charts/nitroberry/Chart.yaml"
+          # Auto-increment patch version (e.g., 1.0.1 -> 1.0.2)
+          VERSION=$(grep '^version:' $CHART_FILE | awk '{print $2}')
+          IFS='.' read -r major minor patch <<< "$VERSION"
+          NEW_PATCH=$((patch + 1))
+          NEW_VERSION="$major.$minor.$NEW_PATCH"
+          
+          # Update version and appVersion in Chart.yaml
+          sed -i "s/^version: .*/version: $NEW_VERSION/" $CHART_FILE
+          sed -i "s/^appVersion: .*/appVersion: \"${{ needs.build.outputs.image_tag }}\"/" $CHART_FILE
+          
+          echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Login to ECR for Helm
+        run: |
+          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
+          | helm registry login --username AWS --password-stdin ${{ secrets.CR_ENDPOINT }}
+
+      - name: Package and Push Chart
+        run: |
+          cd kubernetes_nitroberry/charts/nitroberry
+          helm package .
+          helm push nitroberry-${{ steps.versioning.outputs.NEW_VERSION }}.tgz oci://${{ secrets.CR_ENDPOINT }}/
+
+      - name: Push Version Bump to Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add kubernetes_nitroberry/charts/nitroberry/Chart.yaml
+          git commit -m "chore: bump chart to ${{ steps.versioning.outputs.NEW_VERSION }} [skip ci]"
+          git push
